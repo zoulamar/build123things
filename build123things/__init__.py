@@ -18,6 +18,8 @@ from abc import ABC, ABCMeta, abstractmethod
 from typing import NoReturn, Set, TypeAlias, Union, final, Any, Callable, Tuple, Generator
 import build123d as bd
 import numpy as np
+
+from build123things.joints import Revolute
 from .misc import memoize, random_tmp_fname
 import colored
 import copy
@@ -493,7 +495,10 @@ class Thing (ABC, metaclass=ThingMeta):
 
     @final
     def enumerate_assembly(self, subassembly = True, where_attached = False, reference = False) -> Generator[Tuple[str,"TransformResolver"], None, None]:
-        """ Enumerates all other `Things` attached to `self` via an instance of `AbstractJoint`. """
+        """ Enumerates all other `Things` attached to `self` via an instance of `AbstractJoint`.
+
+        NOTE: Might be deprecated in favor of `walk` method in the future.
+        """
         idset:Set[int] = set()
         for name, value in self.__dict__.items():
             if isinstance(value, MountPoint):
@@ -504,6 +509,61 @@ class Thing (ABC, metaclass=ThingMeta):
                         yield f"{name}:{i}", TransformResolver(value, i)
             elif isinstance(value, ReferenceTransformResolver) and reference:
                  yield name, value
+
+    WALK_RETURN_TYPE = tuple[int, "AbstractJoint|None", "Thing", list[Any]]
+
+    @final
+    def walk (
+            self:"Thing",
+            bfs:bool = False, # If `True`, traverse the Thing breath-first. If `False`, traverse depth-first.
+            allow_traverse_upwards:bool = True, # If `True`, the algorighm will ascend also against the assembly graph - i.e., it may follow to the super-thing.
+            depth_limit:int|None = None, # How many joints may be traversed. `0` yields only `thing`, `1` yields `thing` and also its immediate neighbours, and so on.
+            include_mount_points:bool = False,
+            include_reference_geometries:bool = False,
+            expand_hag:bool = True, # Natively, the assemblies are stored by
+            ) -> Generator[WALK_RETURN_TYPE, None, None]:
+        """ A generic function, which is able to iterate over all components of the Thing regardless.
+
+        yields: Pairs (int i, Joint j, Thing t, list l) where `i` denotes the traversal-index of a Thing to which `t` is connected via `j`. `l` possibly contains reference geometries and mount points of the Thing. Index `0` is for the `thing` parameter.
+
+
+        """
+
+        def id_fnc_expanding (thing:Thing, previous_id:tuple[int], *__, **___) -> tuple[int]:
+            """ The function takes a previous ID and extends it with an identifier of given Thing. """
+            ...
+
+        def id_fnc_conserving (thing:Thing, *__, **___) -> tuple[int]:
+            """ The function returns simple identifier of given Thing. """
+            ...
+
+        id_fnc_selected = id_fnc_expanding if expand_hag else id_fnc_conserving
+        """ One of two id-making functions is stored here. """
+
+        idset:set[tuple[int]] = set()
+        """ Store identifiers of already expanded Things/paths such that we don't go there again. """
+
+        queuestack:list[Thing] = [self]
+        """ Auxiliary list for the purpose of traversal. """
+
+        current_thing_expansion_index:int = 0
+        """ Simple counter of how many times was yielded. Useful to mark adjacency. """
+
+        while len(queuestack) > 0:
+            queuestack_head = queuestack.pop(-1 if bfs else 0)
+            """ Currently expanded Thing. """
+
+            yield (1,Revolute(MountPoint(bd.Location()), MountPoint(bd.Location())), self, [])
+
+            # Expand the search
+            for name, value in self.__dict__.items():
+                if isinstance(value, MountPoint):
+                    ...
+
+
+
+
+
 
     @final
     def __copy__(self) -> "Thing":
