@@ -208,21 +208,6 @@ def export(thing:Thing, target_dir:Path, mujoco_module:bool=False) -> ElementTre
     # Wrap and return
     return ElementTree(document_root)
 
-def walk_thing (
-        thing:Thing,
-        bfs:bool = False, # If `True`, traverse the Thing breath-first. If `False`, traverse depth-first.
-        allow_traverse_upwards:bool = True, # If `True`, the algorighm will ascend also against the assembly graph - i.e., it may follow to the super-thing.
-        depth_limit:int|None = None, # How many joints may be traversed. `0` yields only `thing`, `1` yields `thing` and also its immediate neighbours.
-        ) -> Generator[tuple[int, AbstractJoint, Thing], None, None]:
-    """ A generic function, which is able to iterate over all components of the Thing regardless.
-
-    yields: Pairs (int i, Joint j, Thing t) where `i` denotes the traversal-index of a Thing to which `t` is connected via `j`. Index `0` is for the `thing` parameter.
-
-    TODO: Move this generic function to the Thing definition.
-    """
-
-
-
 if __name__ == "__main__":
     import argparse
     import importlib

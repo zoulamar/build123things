@@ -263,7 +263,7 @@ class Thing (ABC, metaclass=ThingMeta):
             if Thing.CAPTURED_PARAMETER_ATTRIBUTE_NAME not in self.__dict__:
                 self.__dict__[Thing.CAPTURED_PARAMETER_ATTRIBUTE_NAME] = []
             self.__dict__[Thing.CAPTURED_PARAMETER_ATTRIBUTE_NAME].append((cls, bound.arguments))
-            return captured_init(self, *args, **kwargs )
+            return captured_init(self, *args, **kwargs ) # type: ignore
         cls.__init__ = __init__
         return super().__init_subclass__()
 
@@ -510,7 +510,15 @@ class Thing (ABC, metaclass=ThingMeta):
             elif isinstance(value, ReferenceTransformResolver) and reference:
                  yield name, value
 
-    WALK_RETURN_TYPE = tuple[int, "AbstractJoint|None", "Thing", list[Any]]
+    WALK_RETURN_TYPE = tuple["Thing|None", "AbstractJoint|None", "Thing", list[Any], int]
+    """ Describes one part of the kinematics.
+    1. The parent Thing.
+    2. The joint which binds the things in the original setup.
+        (Note, in reverse traversal, you need to handle the joint inversion.)
+    3. The child Thing.
+    4. The child's reference geometries etc.
+    5. The child's depth with regard to new root.
+    """
 
     @final
     def walk (
@@ -522,47 +530,62 @@ class Thing (ABC, metaclass=ThingMeta):
             include_reference_geometries:bool = False,
             expand_hag:bool = True, # Natively, the assemblies are stored by
             ) -> Generator[WALK_RETURN_TYPE, None, None]:
-        """ A generic function, which is able to iterate over all components of the Thing regardless.
+        """ Iterates over components of the Thing.
+        yields tuples of adjacency, however, with the original rooted semantics. If you need to, e.g., switch joint orientations, you need to do it manually.
+        NOTE: To detect, whether an original hierarchy was reversed in the produced traversal, inspect the MountPoint `owner` and also their `known_as` atributes.
 
-        yields: Pairs (int i, Joint j, Thing t, list l) where `i` denotes the traversal-index of a Thing to which `t` is connected via `j`. `l` possibly contains reference geometries and mount points of the Thing. Index `0` is for the `thing` parameter.
-
-
+        TODO: Add automatic joint inversion handling?
+        TODO: Maybe produce a whole different re-rooted Thing?
         """
 
-        def id_fnc_expanding (thing:Thing, previous_id:tuple[int], *__, **___) -> tuple[int]:
+        def id_fnc_expanding (thing:Thing, previous_id:list[int]) -> list[int]:
             """ The function takes a previous ID and extends it with an identifier of given Thing. """
-            ...
+            # TODO: strip possible same-ids from the end
+            return previous_id + [id(thing)]
 
-        def id_fnc_conserving (thing:Thing, *__, **___) -> tuple[int]:
+        def id_fnc_conserving (thing:Thing, _:list[int]) -> list[int]:
             """ The function returns simple identifier of given Thing. """
-            ...
+            return [id(thing)]
 
         id_fnc_selected = id_fnc_expanding if expand_hag else id_fnc_conserving
         """ One of two id-making functions is stored here. """
 
-        idset:set[tuple[int]] = set()
+        idset:set[list[int]] = set()
         """ Store identifiers of already expanded Things/paths such that we don't go there again. """
 
-        queuestack:list[Thing] = [self]
+        queuestack:list[Thing.WALK_RETURN_TYPE] = [(None, None, self, [], 0)]
         """ Auxiliary list for the purpose of traversal. """
 
-        current_thing_expansion_index:int = 0
-        """ Simple counter of how many times was yielded. Useful to mark adjacency. """
+        # Mark it to exclude multiple expansion.
+        idset.add(id_fnc_selected(self, []))
 
         while len(queuestack) > 0:
-            queuestack_head = queuestack.pop(-1 if bfs else 0)
-            """ Currently expanded Thing. """
+            # Yield the current Thing to expend and gather misc. properties.
+            parent, joint, child, _, child_depth = queuestack.pop(-1 if bfs else 0)
+            misc = []
+            if include_mount_points:
+                misc += []
+                raise NotImplementedError
+            if include_reference_geometries:
+                misc += []
+                raise NotImplementedError
+            yield (parent, joint, child, misc, child_depth)
 
-            yield (1,Revolute(MountPoint(bd.Location()), MountPoint(bd.Location())), self, [])
+            # Stop expansion if deep enough
+            if depth_limit is not None and child_depth >= depth_limit:
+                continue
 
-            # Expand the search
+            # Perform the expansion.
+            joints:list[tuple[AbstractJoint, bool]] = []
             for name, value in self.__dict__.items():
                 if isinstance(value, MountPoint):
-                    ...
-
-
-
-
+                    if allow_traverse_upwards and value._joint_outbound is not None:
+                        joints.append((value._joint_outbound, False))
+                    for j in value._joints_inbound:
+                        joints.append((j, True))
+            for joint, hierarchy_conserved in joints:
+                # TODO: Check if the path not already expanded.
+                ...
 
 
     @final
