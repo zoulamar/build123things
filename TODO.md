@@ -1,5 +1,8 @@
 This file contains gathered ideas which could be one day opened in the issue tracker.
 
+# Try running it in [Codon](https://github.com/exaloop/codon)
+Promissing computational performance boost.
+
 # A collection-like attribute results in double transform.
 Having a Thing which aggregates some of its (mounted!) properties in a list-like property (or generator) makes subsequent accesses to such listed properties (through this list) receiving the transform twice.
 
