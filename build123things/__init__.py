@@ -19,7 +19,6 @@ from typing import NoReturn, Set, TypeAlias, Union, final, Any, Callable, Tuple,
 import build123d as bd
 import numpy as np
 
-from build123things.joints import Revolute
 from .misc import memoize, random_tmp_fname
 import colored
 import copy
@@ -27,7 +26,6 @@ import inspect
 from .materials import Material
 import os
 from stl import mesh
-from warnings import warn
 
 MOUNTING_LOCATION:bd.Location = bd.Location((0,0,0),(180,0,90))
 
@@ -39,7 +37,7 @@ DEBUG:Set[str] = set()
 #DEBUG.add("Thing.adjust")
 #DEBUG.add("TransformResolver.__getattr__")
 #DEBUG.add("MountPoint.__init__")
-
+DEBUG.add("Thing.walk")
 
 class ThingMeta (ABCMeta):
     """ Facilitates the parameter capture functionality and the memoization.
@@ -510,7 +508,7 @@ class Thing (ABC, metaclass=ThingMeta):
             elif isinstance(value, ReferenceTransformResolver) and reference:
                  yield name, value
 
-    WALK_RETURN_TYPE = tuple["Thing|None", "AbstractJoint|None", "Thing", list[Any], int, list[int]]
+    WALK_RETURN_TYPE = tuple["Thing|None", "AbstractJoint|None", "Thing", list[Any], int, tuple[int, ...]]
     """ Describes one part of the kinematics.
     1. The parent Thing.
     2. The joint which binds the things in the original setup.
@@ -539,34 +537,37 @@ class Thing (ABC, metaclass=ThingMeta):
         TODO: Maybe produce a whole different re-rooted Thing?
         """
 
-        def id_fnc_expanding (thing:Thing, previous_id:list[int]) -> list[int]:
+        def id_fnc_expanding (thing:Thing, previous_id:tuple[int, ...]) -> tuple[int, ...]:
             """ The function takes a previous ID and extends it with an identifier of given Thing. """
             new_id = id(thing)
-            if new_id == previous_id[-1]:
+            if len(previous_id) == 0:
+                return (new_id,)
+            if len(previous_id) > 0 and new_id == previous_id[-1]:
                 raise RuntimeError("Dark magic happened.")
-            if new_id == previous_id[-2]: # I.e., if the HAG is expanded back where already been, just make the id without the "loop".
+            if len(previous_id) > 1 and new_id == previous_id[-2]: # I.e., if the HAG is expanded back where already been, just make the id without the "loop".
                 previous_id = previous_id[:-2]
-            return previous_id + [new_id]
+            return previous_id + (new_id,)
 
-        def id_fnc_conserving (thing:Thing, _:list[int]) -> list[int]:
+        def id_fnc_conserving (thing:Thing, _:tuple[int, ...]) -> tuple[int, ...]:
             """ The function returns simple identifier of given Thing. """
-            return [id(thing)]
+            return (id(thing),)
 
         id_fnc_selected = id_fnc_expanding if expand_hag else id_fnc_conserving
         """ One of two id-making functions is stored here. """
 
-        idset:set[list[int]] = set()
+        idset:set[tuple[int,...]] = set()
         """ Store identifiers of already expanded Things/paths such that we don't go there again. """
 
-        queuestack:list[Thing.WALK_RETURN_TYPE] = [(None, None, self, [], 0, [])]
+        queuestack:list[Thing.WALK_RETURN_TYPE] = [(None, None, self, [], 0, (id_fnc_selected(self, ())))]
         """ Auxiliary list for the purpose of traversal. """
 
-        # Mark it to exclude multiple expansion.
-        idset.add(id_fnc_selected(self, []))
+        if "Thing.walk" in DEBUG: from pprint import pformat; print(f"Walk start with queuestack =\n{pformat(queuestack)}")
 
         while len(queuestack) > 0:
             # Yield the current Thing to expend and gather misc. properties.
             parent, joint, child, _, child_depth, child_id = queuestack.pop(-1 if bfs else 0)
+            idset.add(child_id)
+            if "Thing.walk" in DEBUG: print(f"Walk level {child_depth:3d} {repr(child)}\n\t child_id: {child_id}\n\t queuestack length {len(queuestack)}\n\t idset {idset}")
             misc = []
             if include_mount_points:
                 misc += []
@@ -586,18 +587,24 @@ class Thing (ABC, metaclass=ThingMeta):
                             joints.append((value._joint_outbound, False))
                         for joint in value._joints_inbound:
                             joints.append((joint, True))
+                if "Thing.walk" in DEBUG: print(f"Joints: {joints}")
                 for joint, hierarchy_conserved in joints:
                     grandchild = joint.get_other_mount(child)._owner
                     assert grandchild is not None
                     grandchild_id = id_fnc_selected(grandchild, child_id)
-                    queuestack.append((
-                        child,
-                        joint,
-                        grandchild,
-                        [],
-                        child_depth+1,
-                        grandchild_id
-                        ))
+                    if grandchild_id not in idset:
+                        queuestack.append((
+                            child,
+                            joint,
+                            grandchild,
+                            [],
+                            child_depth+1,
+                            grandchild_id
+                            ))
+                        if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} added")
+                    else:
+                        if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} REJECTED")
+            #if "Thing.walk" in DEBUG: input(f"Iteration done.")
 
     @final
     def __copy__(self) -> "Thing":
