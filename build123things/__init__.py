@@ -510,14 +510,15 @@ class Thing (ABC, metaclass=ThingMeta):
             elif isinstance(value, ReferenceTransformResolver) and reference:
                  yield name, value
 
-    WALK_RETURN_TYPE = tuple["Thing|None", "AbstractJoint|None", "Thing", list[Any], int]
+    WALK_RETURN_TYPE = tuple["Thing|None", "AbstractJoint|None", "Thing", list[Any], int, list[int]]
     """ Describes one part of the kinematics.
     1. The parent Thing.
     2. The joint which binds the things in the original setup.
         (Note, in reverse traversal, you need to handle the joint inversion.)
     3. The child Thing.
     4. The child's reference geometries etc.
-    5. The child's depth with regard to new root.
+    5. The child's depth w.r.t. new root.
+    6. The child's identifier list.
     """
 
     @final
@@ -530,7 +531,7 @@ class Thing (ABC, metaclass=ThingMeta):
             include_reference_geometries:bool = False,
             expand_hag:bool = True, # Natively, the assemblies are stored by
             ) -> Generator[WALK_RETURN_TYPE, None, None]:
-        """ Iterates over components of the Thing.
+        """ Iterates over components of the Thing and effectively expands the minimal assembly graph into assembly tree.
         yields tuples of adjacency, however, with the original rooted semantics. If you need to, e.g., switch joint orientations, you need to do it manually.
         NOTE: To detect, whether an original hierarchy was reversed in the produced traversal, inspect the MountPoint `owner` and also their `known_as` atributes.
 
@@ -540,8 +541,12 @@ class Thing (ABC, metaclass=ThingMeta):
 
         def id_fnc_expanding (thing:Thing, previous_id:list[int]) -> list[int]:
             """ The function takes a previous ID and extends it with an identifier of given Thing. """
-            # TODO: strip possible same-ids from the end
-            return previous_id + [id(thing)]
+            new_id = id(thing)
+            if new_id == previous_id[-1]:
+                raise RuntimeError("Dark magic happened.")
+            if new_id == previous_id[-2]: # I.e., if the HAG is expanded back where already been, just make the id without the "loop".
+                previous_id = previous_id[:-2]
+            return previous_id + [new_id]
 
         def id_fnc_conserving (thing:Thing, _:list[int]) -> list[int]:
             """ The function returns simple identifier of given Thing. """
@@ -553,7 +558,7 @@ class Thing (ABC, metaclass=ThingMeta):
         idset:set[list[int]] = set()
         """ Store identifiers of already expanded Things/paths such that we don't go there again. """
 
-        queuestack:list[Thing.WALK_RETURN_TYPE] = [(None, None, self, [], 0)]
+        queuestack:list[Thing.WALK_RETURN_TYPE] = [(None, None, self, [], 0, [])]
         """ Auxiliary list for the purpose of traversal. """
 
         # Mark it to exclude multiple expansion.
@@ -561,7 +566,7 @@ class Thing (ABC, metaclass=ThingMeta):
 
         while len(queuestack) > 0:
             # Yield the current Thing to expend and gather misc. properties.
-            parent, joint, child, _, child_depth = queuestack.pop(-1 if bfs else 0)
+            parent, joint, child, _, child_depth, child_id = queuestack.pop(-1 if bfs else 0)
             misc = []
             if include_mount_points:
                 misc += []
@@ -569,24 +574,30 @@ class Thing (ABC, metaclass=ThingMeta):
             if include_reference_geometries:
                 misc += []
                 raise NotImplementedError
-            yield (parent, joint, child, misc, child_depth)
+            yield (parent, joint, child, misc, child_depth, child_id)
 
-            # Stop expansion if deep enough
-            if depth_limit is not None and child_depth >= depth_limit:
-                continue
-
-            # Perform the expansion.
-            joints:list[tuple[AbstractJoint, bool]] = []
-            for name, value in self.__dict__.items():
-                if isinstance(value, MountPoint):
-                    if allow_traverse_upwards and value._joint_outbound is not None:
-                        joints.append((value._joint_outbound, False))
-                    for j in value._joints_inbound:
-                        joints.append((j, True))
-            for joint, hierarchy_conserved in joints:
-                # TODO: Check if the path not already expanded.
-                ...
-
+            # Expansion if shallow enough
+            if depth_limit is None or len(child_id) < depth_limit:
+                joints:list[tuple[AbstractJoint, bool]] = []
+                """ Auxiliary list which gathers all joints incident with `child`. Boolean value: True~Joint leads along original hierarchy, False~Joint leads against original hierarchy."""
+                for name, value in self.__dict__.items():
+                    if isinstance(value, MountPoint):
+                        if allow_traverse_upwards and value._joint_outbound is not None:
+                            joints.append((value._joint_outbound, False))
+                        for joint in value._joints_inbound:
+                            joints.append((joint, True))
+                for joint, hierarchy_conserved in joints:
+                    grandchild = joint.get_other_mount(child)._owner
+                    assert grandchild is not None
+                    grandchild_id = id_fnc_selected(grandchild, child_id)
+                    queuestack.append((
+                        child,
+                        joint,
+                        grandchild,
+                        [],
+                        child_depth+1,
+                        grandchild_id
+                        ))
 
     @final
     def __copy__(self) -> "Thing":
@@ -809,12 +820,22 @@ class AbstractJoint (ABC):
         This rather wild conditional assignment allows setting it in subclass constructor befor or after calling this init."""
         self.set_default()
 
-    def get_other_mount(self, ref:MountPoint) -> MountPoint:
+    def get_other_mount(self, ref:MountPoint|Thing) -> MountPoint:
         """ Identifies the mount which a given Thing is attached by this Joint. """
-        if ref is self.reference_mount:
-            return self.moving_mount
-        elif ref is self.moving_mount:
-            return self.reference_mount
+        if isinstance(ref, MountPoint):
+            if ref is self.reference_mount:
+                return self.moving_mount
+            elif ref is self.moving_mount:
+                return self.reference_mount
+            else:
+                raise ValueError
+        elif isinstance(ref, Thing):
+            if ref is self.reference_mount._owner:
+                return self.moving_mount
+            elif ref is self.moving_mount._owner:
+                return self.reference_mount
+            else:
+                raise ValueError
         else:
             raise ValueError
 
