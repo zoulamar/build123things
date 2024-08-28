@@ -523,7 +523,7 @@ class Thing (ABC, metaclass=ThingMeta):
     def walk (
             self:"Thing",
             bfs:bool = False, # If `True`, traverse the Thing breath-first. If `False`, traverse depth-first.
-            allow_traverse_upwards:bool = True, # If `True`, the algorighm will ascend also against the assembly graph - i.e., it may follow to the super-thing.
+            traverse_upwards_budget:int = 1, # If `==0`, the algorithm may only descend along original hierarchy, effectively traversing the subassembly. If `==1`, the algorighm will be allowed to have only one streak of traversal against original hierarchy. Once it starts descending after ascending, it won't be able to ascend again. If `>1`, no guarantees on semantics.
             depth_limit:int|None = None, # How many joints may be traversed. `0` yields only `thing`, `1` yields `thing` and also its immediate neighbours, and so on.
             include_mount_points:bool = False,
             include_reference_geometries:bool = False,
@@ -577,19 +577,26 @@ class Thing (ABC, metaclass=ThingMeta):
                 raise NotImplementedError
             yield (parent, joint, child, misc, child_depth, child_id)
 
+
             # Expansion if shallow enough
             if depth_limit is None or len(child_id) < depth_limit:
                 joints:list[tuple[AbstractJoint, bool]] = []
                 """ Auxiliary list which gathers all joints incident with `child`. Boolean value: True~Joint leads along original hierarchy, False~Joint leads against original hierarchy."""
-                for name, value in self.__dict__.items():
+                for name, value in child.__dict__.items():
                     if isinstance(value, MountPoint):
                         if allow_traverse_upwards and value._joint_outbound is not None:
-                            joints.append((value._joint_outbound, False))
+                            joints.append((value._joint_outbound, True))
                         for joint in value._joints_inbound:
-                            joints.append((joint, True))
+                            joints.append((joint, False))
                 if "Thing.walk" in DEBUG: print(f"Joints: {joints}")
                 for joint, hierarchy_conserved in joints:
-                    grandchild = joint.get_other_mount(child)._owner
+                    print("JOINT", hierarchy_conserved, joint)
+                    try:
+                        grandchild = joint.get_other_mount(child)._owner
+                    except:
+                        print(child.mount_origin)
+                        raise
+
                     assert grandchild is not None
                     grandchild_id = id_fnc_selected(grandchild, child_id)
                     if grandchild_id not in idset:
@@ -604,7 +611,7 @@ class Thing (ABC, metaclass=ThingMeta):
                         if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} added")
                     else:
                         if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} REJECTED")
-            #if "Thing.walk" in DEBUG: input(f"Iteration done.")
+            if "Thing.walk" in DEBUG: input(f"Iteration done.")
 
     @final
     def __copy__(self) -> "Thing":
@@ -842,6 +849,7 @@ class AbstractJoint (ABC):
             elif ref is self.moving_mount._owner:
                 return self.reference_mount
             else:
+                #print(f"Cannot match {repr(ref)} against {repr(self.reference_mount._owner)} or {repr(self.moving_mount._owner)}")
                 raise ValueError
         else:
             raise ValueError

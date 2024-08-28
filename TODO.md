@@ -1,5 +1,9 @@
 This file contains gathered ideas which could be one day opened in the issue tracker.
 
+# Document the possibility and possible issues with having a forest-of-Things.
+Can some sub-Thing safely be used as part of more different Things? How to distinguish it during graph traversal.
+- Introduce Thing domains - each Thing will remember which subassemblies (assembly roots) it is member of. If a walk is issued, it will stay in the same/selected domain.
+
 # Try running it in [Codon](https://github.com/exaloop/codon)
 Promissing computational performance boost.
 
