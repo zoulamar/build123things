@@ -15,7 +15,8 @@ Perhaps consider this module as a collection of CONVENTIONS of working with the 
 
 from ctypes import ArgumentError
 from abc import ABC, ABCMeta, abstractmethod
-from typing import NoReturn, Set, TypeAlias, Union, final, Any, Callable, Tuple, Generator
+from pprint import pformat
+from typing import NamedTuple, NoReturn, Set, TypeAlias, Union, final, Any, Callable, Tuple, Generator
 import build123d as bd
 import numpy as np
 
@@ -508,106 +509,102 @@ class Thing (ABC, metaclass=ThingMeta):
             elif isinstance(value, ReferenceTransformResolver) and reference:
                  yield name, value
 
-    WALK_RETURN_TYPE = tuple["Thing|None", "AbstractJoint|None", "Thing", list[Any], int, tuple[int, ...]]
-    """ Describes one part of the kinematics.
-    1. The parent Thing.
-    2. The joint which binds the things in the original setup.
-        (Note, in reverse traversal, you need to handle the joint inversion.)
-    3. The child Thing.
-    4. The child's reference geometries etc.
-    5. The child's depth w.r.t. new root.
-    6. The child's identifier list.
-    """
+    class WalkReturnType (NamedTuple):
+        """ A structured container to hold a walk expansion state and also provide the per-partes description of the kinematics. """
+        parent:"Thing|None"
+        joint:"AbstractJoint|None"
+        child:"Thing"
+        identifier:tuple[int,...]
+        """ Lenght of the tuple equals the depth (distance to walk start) of the node."""
+        allow_continuation_against_hierarchy:bool
+        """ During traversal, the neighbours might be oriented along or against the original hierarchy. As the walk proceeds, it might change this "direction" from time to time. Having a track of how many time this happened is necessary to correctly explode the succinct assembly DAG. """
 
     @final
     def walk (
             self:"Thing",
-            bfs:bool = False, # If `True`, traverse the Thing breath-first. If `False`, traverse depth-first.
-            traverse_upwards_budget:int = 1, # If `==0`, the algorithm may only descend along original hierarchy, effectively traversing the subassembly. If `==1`, the algorighm will be allowed to have only one streak of traversal against original hierarchy. Once it starts descending after ascending, it won't be able to ascend again. If `>1`, no guarantees on semantics.
-            depth_limit:int|None = None, # How many joints may be traversed. `0` yields only `thing`, `1` yields `thing` and also its immediate neighbours, and so on.
-            include_mount_points:bool = False,
-            include_reference_geometries:bool = False,
-            expand_hag:bool = True, # Natively, the assemblies are stored by
-            ) -> Generator[WALK_RETURN_TYPE, None, None]:
-        """ Iterates over components of the Thing and effectively expands the minimal assembly graph into assembly tree.
-        yields tuples of adjacency, however, with the original rooted semantics. If you need to, e.g., switch joint orientations, you need to do it manually.
-        NOTE: To detect, whether an original hierarchy was reversed in the produced traversal, inspect the MountPoint `owner` and also their `known_as` atributes.
+            bfs:bool = False,
+            allow_traversal_against_hierarchy:bool = True,
+            depth_limit:int|None = None,
+            ) -> Generator[WalkReturnType, None, None]:
+        """ Iterates over components of the Thing and effectively expands the
+        succinct assembly DAG into verbose assembly tree.
 
-        TODO: Add automatic joint inversion handling?
-        TODO: Maybe produce a whole different re-rooted Thing?
+        Args:
+            bfs (bool): If `True`, traverse the Thing breath-first. If `False`,
+            traverse depth-first.
+
+            allow_traversal_against_hierarchy (bool): Self-explaining.
+
+            depth_limit (int|None): How many joints may be traversed. `0`
+            yields only `self`, `1` yields `self` and also its immediate
+            neighbours, and so on.
+
+        Yields: WalkReturnType
+
+        TODO:
+            - Add automatic joint inversion handling?
+            - Maybe produce a whole different re-rooted Thing? This would align
+                with already deprecated and removed "non-expanding id_fnc".
+
         """
 
-        def id_fnc_expanding (thing:Thing, previous_id:tuple[int, ...]) -> tuple[int, ...]:
+        def id_fnc (thing:Thing, previous_id:tuple[int, ...]) -> tuple[int, ...]:
             """ The function takes a previous ID and extends it with an identifier of given Thing. """
+
             new_id = id(thing)
             if len(previous_id) == 0:
                 return (new_id,)
             if len(previous_id) > 0 and new_id == previous_id[-1]:
                 raise RuntimeError("Dark magic happened.")
-            if len(previous_id) > 1 and new_id == previous_id[-2]: # I.e., if the HAG is expanded back where already been, just make the id without the "loop".
+            if len(previous_id) > 1 and new_id == previous_id[-2]:
+                # I.e., if the HAG is expanded back where already been, just make the id without the "loop".
                 previous_id = previous_id[:-2]
             return previous_id + (new_id,)
 
-        def id_fnc_conserving (thing:Thing, _:tuple[int, ...]) -> tuple[int, ...]:
-            """ The function returns simple identifier of given Thing. """
-            return (id(thing),)
-
-        id_fnc_selected = id_fnc_expanding if expand_hag else id_fnc_conserving
-        """ One of two id-making functions is stored here. """
 
         idset:set[tuple[int,...]] = set()
         """ Store identifiers of already expanded Things/paths such that we don't go there again. """
 
-        queuestack:list[Thing.WALK_RETURN_TYPE] = [(None, None, self, [], 0, (id_fnc_selected(self, ())))]
+        queuestack:list[Thing.WalkReturnType] = [Thing.WalkReturnType(
+                parent=None,
+                joint=None,
+                child=self,
+                identifier=(id(self),),
+                allow_continuation_against_hierarchy=allow_traversal_against_hierarchy,
+            )]
         """ Auxiliary list for the purpose of traversal. """
 
-        if "Thing.walk" in DEBUG: from pprint import pformat; print(f"Walk start with queuestack =\n{pformat(queuestack)}")
-
         while len(queuestack) > 0:
-            # Yield the current Thing to expend and gather misc. properties.
-            parent, joint, child, _, child_depth, child_id = queuestack.pop(-1 if bfs else 0)
-            idset.add(child_id)
-            if "Thing.walk" in DEBUG: print(f"Walk level {child_depth:3d} {repr(child)}\n\t child_id: {child_id}\n\t queuestack length {len(queuestack)}\n\t idset {idset}")
-            misc = []
-            if include_mount_points:
-                misc += []
-                raise NotImplementedError
-            if include_reference_geometries:
-                misc += []
-                raise NotImplementedError
-            yield (parent, joint, child, misc, child_depth, child_id)
+            current_walk_node = queuestack.pop(-1 if bfs else 0)
+            idset.add(current_walk_node.identifier)
+            yield current_walk_node
+            if "Thing.walk" in DEBUG: print(f"Popped walk element: {pformat(current_walk_node)}")
 
-
-            # Expansion if shallow enough
-            if depth_limit is None or len(child_id) < depth_limit:
+            if depth_limit is None or len(current_walk_node.identifier) < depth_limit:
                 joints:list[tuple[AbstractJoint, bool]] = []
-                """ Auxiliary list which gathers all joints incident with `child`. Boolean value: True~Joint leads along original hierarchy, False~Joint leads against original hierarchy."""
-                for name, value in child.__dict__.items():
+                """ Gather all joints incident with `child`. Boolean meaning: `True`~Joint leads along original hierarchy, `False`~Joint leads against original hierarchy."""
+                for name, value in current_walk_node.child.__dict__.items():
                     if isinstance(value, MountPoint):
-                        if allow_traverse_upwards and value._joint_outbound is not None:
+                        if value._joint_outbound is not None:
                             joints.append((value._joint_outbound, True))
-                        for joint in value._joints_inbound:
-                            joints.append((joint, False))
+                        if current_walk_node.allow_continuation_against_hierarchy:
+                            for joint in value._joints_inbound:
+                                joints.append((joint, False))
                 if "Thing.walk" in DEBUG: print(f"Joints: {joints}")
                 for joint, hierarchy_conserved in joints:
                     print("JOINT", hierarchy_conserved, joint)
-                    try:
-                        grandchild = joint.get_other_mount(child)._owner
-                    except:
-                        print(child.mount_origin)
-                        raise
+                    grandchild = joint.get_other_mount(current_walk_node.child)._owner
 
                     assert grandchild is not None
-                    grandchild_id = id_fnc_selected(grandchild, child_id)
+                    grandchild_id = id_fnc(grandchild, current_walk_node.identifier)
                     if grandchild_id not in idset:
-                        queuestack.append((
-                            child,
-                            joint,
-                            grandchild,
-                            [],
-                            child_depth+1,
-                            grandchild_id
-                            ))
+                        queuestack.append(Thing.WalkReturnType(
+                            parent=current_walk_node.child,
+                            joint=joint,
+                            child=grandchild,
+                            identifier=grandchild_id,
+                            allow_continuation_against_hierarchy=True if not hierarchy_conserved and current_walk_node.allow_continuation_against_hierarchy else False,
+                        ))
                         if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} added")
                     else:
                         if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} REJECTED")
