@@ -99,10 +99,10 @@ class EndEffector (Thing):
         body = bd.sweep(sweep_profile,sweep_trajectory,transition=bd.Transition.ROUND) + bd.extrude(self.servo_ref.rotor_center.location * bd.Circle(self.servo_ref.p.rotor_radius_1+thickness), amount=thickness) - bd.extrude(self.servo_ref.rotor_center.location * bd.Circle(self.servo_ref.p.rotor_radius_2), amount=thickness)
         for i in range(8):
             body -= getattr(self.servo_ref, f"screw_rotor_row1_{i}")(1.5).body_hull
-        self.pen = MountPoint(bd.Location(bd.Vector(0,servo_clearance+thickness,0), (90,-90,0)))
-        Rigid(self.pen, EndEffectorCap().mount)
-        body -= self.pen.screw_1.body_hull
-        body -= self.pen.screw_2.body_hull
+        self.cap = MountPoint(bd.Location(bd.Vector(0,servo_clearance+thickness,0), (90,-90,0)))
+        Rigid(self.cap, EndEffectorCap().mount)
+        body -= self.cap.screw_1.body_hull
+        body -= self.cap.screw_2.body_hull
         self.mount = MountPoint(self.servo_ref.rotor_center.location * MOUNTING_LOCATION)
         self.body = body
 

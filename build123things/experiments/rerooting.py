@@ -6,9 +6,10 @@ from build123things.examples.serial_manip import EndEffector, LinkBase
 #for a in EndEffector().walk():
 #    print(a)
 
-print("Try walk on link base")
-for a in LinkBase().walk():
+print("Try in reverse")
+obj_root = LinkBase()
+pen = obj_root.shoulder.humerus.forearm.ee.cap.pen
+for a in pen.walk():
     ...
-
 
 

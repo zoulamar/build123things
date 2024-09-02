@@ -610,13 +610,6 @@ class Thing (ABC, metaclass=ThingMeta):
                         if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} REJECTED")
             if "Thing.walk" in DEBUG: input(f"Iteration done.")
 
-    def find (self, descr:str):
-        """ Traverses sub-assembly and tries to find a Thing with given specification.
-
-        TODO: Make at least a rudimentary specification format.
-        """
-        raise NotImplementedError
-
     @final
     def __copy__(self) -> "Thing":
         """ Since a Thing is read-only, no real copy is necessary. """
