@@ -354,6 +354,7 @@ class Thing (ABC, metaclass=ThingMeta):
         """ Either a construction element is retrieved, or a AbstractJointGrounder which facilitates dynamic transformation resolution.
         This is the only entry point to the Grounder mechanism.
         """
+        assert __name.isidentifier()
         __dict__ = super().__getattribute__("__dict__")
         if __name in __dict__:
             __value:Any = self.__dict__[__name]
@@ -512,12 +513,23 @@ class Thing (ABC, metaclass=ThingMeta):
     class WalkReturnType (NamedTuple):
         """ A structured container to hold a walk expansion state and also provide the per-partes description of the kinematics. """
         parent:"Thing|None"
+        parent_identifier:tuple[int,...]
         joint:"AbstractJoint|None"
         child:"Thing"
-        identifier:tuple[int,...]
+        child_identifier:tuple[int,...]
         """ Lenght of the tuple equals the depth (distance to walk start) of the node."""
         allow_continuation_against_hierarchy:bool
         """ During traversal, the neighbours might be oriented along or against the original hierarchy. As the walk proceeds, it might change this "direction" from time to time. Having a track of how many time this happened is necessary to correctly explode the succinct assembly DAG. """
+
+        @property
+        def child_depth (self):
+            """ How many edges needs to be traversed to get to the walk's root. """
+            return len(self.child_identifier)
+
+        @property
+        def parent_depth (self):
+            """ How many edges needs to be traversed to get to the walk's root. """
+            return len(self.parent_identifier)
 
     @final
     def walk (
@@ -528,6 +540,11 @@ class Thing (ABC, metaclass=ThingMeta):
             ) -> Generator[WalkReturnType, None, None]:
         """ Iterates over components of the Thing and effectively expands the
         succinct assembly DAG into verbose assembly tree.
+
+        Note: This method effectively bypasses the `TransformResolver`
+            mechanism as it yields only the Thing-Joint-Thing pairs. If you
+            need to use the Resolver, feel free to use `Joint.mount._known_as`
+            attribute and like.
 
         Args:
             bfs (bool): If `True`, traverse the Thing breath-first. If `False`,
@@ -561,26 +578,26 @@ class Thing (ABC, metaclass=ThingMeta):
                 previous_id = previous_id[:-2]
             return previous_id + (new_id,)
 
-
         idset:set[tuple[int,...]] = set()
         """ Store identifiers of already expanded Things/paths such that we don't go there again. """
 
         queuestack:list[Thing.WalkReturnType] = [Thing.WalkReturnType(
                 parent=None,
+                parent_identifier=(),
                 joint=None,
                 child=self,
-                identifier=(id(self),),
+                child_identifier=(id(self),),
                 allow_continuation_against_hierarchy=allow_traversal_against_hierarchy,
             )]
         """ Auxiliary list for the purpose of traversal. """
 
         while len(queuestack) > 0:
-            current_walk_node = queuestack.pop(-1 if bfs else 0)
-            idset.add(current_walk_node.identifier)
+            current_walk_node = queuestack.pop(0 if bfs else -1)
+            idset.add(current_walk_node.child_identifier)
             yield current_walk_node
             if "Thing.walk" in DEBUG: print(f"Popped walk element: {pformat(current_walk_node)}")
 
-            if depth_limit is None or len(current_walk_node.identifier) < depth_limit:
+            if depth_limit is None or len(current_walk_node.child_identifier) < depth_limit:
                 joints:list[tuple[AbstractJoint, bool]] = []
                 """ Gather all joints incident with `child`. Boolean meaning: `True`~Joint leads along original hierarchy, `False`~Joint leads against original hierarchy."""
                 for name, value in current_walk_node.child.__dict__.items():
@@ -596,13 +613,14 @@ class Thing (ABC, metaclass=ThingMeta):
                     grandchild = joint.get_other_mount(current_walk_node.child)._owner
 
                     assert grandchild is not None
-                    grandchild_id = id_fnc(grandchild, current_walk_node.identifier)
+                    grandchild_id = id_fnc(grandchild, current_walk_node.child_identifier)
                     if grandchild_id not in idset:
                         queuestack.append(Thing.WalkReturnType(
                             parent=current_walk_node.child,
+                            parent_identifier=current_walk_node.child_identifier,
                             joint=joint,
                             child=grandchild,
-                            identifier=grandchild_id,
+                            child_identifier=grandchild_id,
                             allow_continuation_against_hierarchy=True if not hierarchy_conserved and current_walk_node.allow_continuation_against_hierarchy else False,
                         ))
                         if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} added")
