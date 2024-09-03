@@ -531,6 +531,12 @@ class Thing (ABC, metaclass=ThingMeta):
             """ How many edges needs to be traversed to get to the walk's root. """
             return len(self.parent_identifier)
 
+        def __str__(self) -> str:
+            pn = self.parent.codename() if self.parent is not None else "None"
+            jn = self.joint.__class__.__name__
+            cn = self.child.codename()
+            return f"{pn} =={jn}=> {cn}"
+
     @final
     def walk (
             self:"Thing",
@@ -565,17 +571,14 @@ class Thing (ABC, metaclass=ThingMeta):
 
         """
 
-        def id_fnc (thing:Thing, previous_id:tuple[int, ...]) -> tuple[int, ...]:
+        def id_fnc (obj:AbstractJoint, previous_id:tuple[int, ...]) -> tuple[int, ...]:
             """ The function takes a previous ID and extends it with an identifier of given Thing. """
 
-            new_id = id(thing)
+            new_id = id(obj)
             if len(previous_id) == 0:
                 return (new_id,)
             if len(previous_id) > 0 and new_id == previous_id[-1]:
-                raise RuntimeError("Dark magic happened.")
-            if len(previous_id) > 1 and new_id == previous_id[-2]:
-                # I.e., if the HAG is expanded back where already been, just make the id without the "loop".
-                previous_id = previous_id[:-2]
+                previous_id = previous_id[:-1]
             return previous_id + (new_id,)
 
         idset:set[tuple[int,...]] = set()
@@ -586,7 +589,7 @@ class Thing (ABC, metaclass=ThingMeta):
                 parent_identifier=(),
                 joint=None,
                 child=self,
-                child_identifier=(id(self),),
+                child_identifier=(0,),
                 allow_continuation_against_hierarchy=allow_traversal_against_hierarchy,
             )]
         """ Auxiliary list for the purpose of traversal. """
@@ -594,8 +597,7 @@ class Thing (ABC, metaclass=ThingMeta):
         while len(queuestack) > 0:
             current_walk_node = queuestack.pop(0 if bfs else -1)
             idset.add(current_walk_node.child_identifier)
-            yield current_walk_node
-            if "Thing.walk" in DEBUG: print(f"Popped walk element: {pformat(current_walk_node)}")
+            if "Thing.walk" in DEBUG: print(f"\n{pformat(current_walk_node)}")
 
             if depth_limit is None or len(current_walk_node.child_identifier) < depth_limit:
                 joints:list[tuple[AbstractJoint, bool]] = []
@@ -613,7 +615,7 @@ class Thing (ABC, metaclass=ThingMeta):
                     grandchild = joint.get_other_mount(current_walk_node.child)._owner
 
                     assert grandchild is not None
-                    grandchild_id = id_fnc(grandchild, current_walk_node.child_identifier)
+                    grandchild_id = id_fnc(joint, current_walk_node.child_identifier)
                     if grandchild_id not in idset:
                         queuestack.append(Thing.WalkReturnType(
                             parent=current_walk_node.child,
@@ -626,7 +628,9 @@ class Thing (ABC, metaclass=ThingMeta):
                         if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} added")
                     else:
                         if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} REJECTED")
-            if "Thing.walk" in DEBUG: input(f"Iteration done.")
+
+            yield current_walk_node
+            if "Thing.walk" in DEBUG: print(f"Iteration done.")
 
     @final
     def __copy__(self) -> "Thing":

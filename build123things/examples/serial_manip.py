@@ -68,7 +68,6 @@ class LinkHumerus (LinkProtoArm):
         self.joint = Revolute(self.forearm, LinkForearm().mount_by_braces)
         self.joint.set(ANGLES[2])
 
-
 class LinkForearm (LinkProtoArm):
     def __init__(self) -> None:
         super().__init__()
