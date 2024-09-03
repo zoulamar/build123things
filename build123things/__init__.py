@@ -805,7 +805,7 @@ class AbstractJoint (ABC):
 
         If the mount point had "second owner", which would reference this joint for convenience, it would make multi-mounting very hard.
         """
-        raise RuntimeError("Never call this subclass method.")
+        raise RuntimeError("Never call this subclass method - it has to be overriden.")
 
     def __init__ (self, reference_mount:"MountPoint|TransformResolver", moving_mount:"MountPoint|TransformResolver", mounts_are_peers:bool=False):
         """ For the purpose of defining hierarchy in the design, always one of the mounts is designated as the reference mount which is regarded as the local root of the induced subassembly.
