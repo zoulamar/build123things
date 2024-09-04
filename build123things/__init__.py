@@ -15,9 +15,11 @@ Perhaps consider this module as a collection of CONVENTIONS of working with the 
 
 from ctypes import ArgumentError
 from abc import ABC, ABCMeta, abstractmethod
-from typing import NoReturn, Set, TypeAlias, Union, final, Any, Callable, Tuple, Generator
+from pprint import pformat
+from typing import NamedTuple, NoReturn, Set, TypeAlias, Union, final, Any, Callable, Tuple, Generator
 import build123d as bd
 import numpy as np
+
 from .misc import memoize, random_tmp_fname
 import colored
 import copy
@@ -25,7 +27,6 @@ import inspect
 from .materials import Material
 import os
 from stl import mesh
-from warnings import warn
 
 MOUNTING_LOCATION:bd.Location = bd.Location((0,0,0),(180,0,90))
 
@@ -37,7 +38,7 @@ DEBUG:Set[str] = set()
 #DEBUG.add("Thing.adjust")
 #DEBUG.add("TransformResolver.__getattr__")
 #DEBUG.add("MountPoint.__init__")
-
+DEBUG.add("Thing.walk")
 
 class ThingMeta (ABCMeta):
     """ Facilitates the parameter capture functionality and the memoization.
@@ -261,7 +262,7 @@ class Thing (ABC, metaclass=ThingMeta):
             if Thing.CAPTURED_PARAMETER_ATTRIBUTE_NAME not in self.__dict__:
                 self.__dict__[Thing.CAPTURED_PARAMETER_ATTRIBUTE_NAME] = []
             self.__dict__[Thing.CAPTURED_PARAMETER_ATTRIBUTE_NAME].append((cls, bound.arguments))
-            return captured_init(self, *args, **kwargs )
+            return captured_init(self, *args, **kwargs ) # type: ignore
         cls.__init__ = __init__
         return super().__init_subclass__()
 
@@ -353,6 +354,7 @@ class Thing (ABC, metaclass=ThingMeta):
         """ Either a construction element is retrieved, or a AbstractJointGrounder which facilitates dynamic transformation resolution.
         This is the only entry point to the Grounder mechanism.
         """
+        assert __name.isidentifier()
         __dict__ = super().__getattribute__("__dict__")
         if __name in __dict__:
             __value:Any = self.__dict__[__name]
@@ -511,7 +513,10 @@ class Thing (ABC, metaclass=ThingMeta):
 
     @final
     def enumerate_assembly(self, subassembly = True, where_attached = False, reference = False) -> Generator[Tuple[str,"TransformResolver"], None, None]:
-        """ Enumerates all other `Things` attached to `self` via an instance of `AbstractJoint`. """
+        """ Enumerates all other `Things` attached to `self` via an instance of `AbstractJoint`.
+
+        NOTE: Might be deprecated in favor of `walk` method in the future.
+        """
         idset:Set[int] = set()
         for name, value in self.__dict__.items():
             if isinstance(value, MountPoint):
@@ -522,6 +527,128 @@ class Thing (ABC, metaclass=ThingMeta):
                         yield f"{name}:{i}", TransformResolver(value, i)
             elif isinstance(value, ReferenceTransformResolver) and reference:
                  yield name, value
+
+    class WalkReturnType (NamedTuple):
+        """ A structured container to hold a walk expansion state and also provide the per-partes description of the kinematics. """
+        parent:"Thing|None"
+        parent_identifier:tuple[int,...]
+        joint:"AbstractJoint|None"
+        child:"Thing"
+        child_identifier:tuple[int,...]
+        """ Lenght of the tuple equals the depth (distance to walk start) of the node."""
+        allow_continuation_against_hierarchy:bool
+        """ During traversal, the neighbours might be oriented along or against the original hierarchy. As the walk proceeds, it might change this "direction" from time to time. Having a track of how many time this happened is necessary to correctly explode the succinct assembly DAG. """
+
+        @property
+        def child_depth (self):
+            """ How many edges needs to be traversed to get to the walk's root. """
+            return len(self.child_identifier)
+
+        @property
+        def parent_depth (self):
+            """ How many edges needs to be traversed to get to the walk's root. """
+            return len(self.parent_identifier)
+
+        def __str__(self) -> str:
+            pn = self.parent.codename() if self.parent is not None else "None"
+            jn = self.joint.__class__.__name__
+            cn = self.child.codename()
+            return f"{pn} =={jn}=> {cn}"
+
+    @final
+    def walk (
+            self:"Thing",
+            bfs:bool = False,
+            allow_traversal_against_hierarchy:bool = True,
+            depth_limit:int|None = None,
+            ) -> Generator[WalkReturnType, None, None]:
+        """ Iterates over components of the Thing and effectively expands the
+        succinct assembly DAG into verbose assembly tree.
+
+        Note: This method effectively bypasses the `TransformResolver`
+            mechanism as it yields only the Thing-Joint-Thing pairs. If you
+            need to use the Resolver, feel free to use `Joint.mount._known_as`
+            attribute and like.
+
+        Args:
+            bfs (bool): If `True`, traverse the Thing breath-first. If `False`,
+            traverse depth-first.
+
+            allow_traversal_against_hierarchy (bool): Self-explaining.
+
+            depth_limit (int|None): How many joints may be traversed. `0`
+            yields only `self`, `1` yields `self` and also its immediate
+            neighbours, and so on.
+
+        Yields: WalkReturnType
+
+        TODO:
+            - Add automatic joint inversion handling?
+            - Maybe produce a whole different re-rooted Thing? This would align
+                with already deprecated and removed "non-expanding id_fnc".
+
+        """
+
+        def id_fnc (obj:AbstractJoint, previous_id:tuple[int, ...]) -> tuple[int, ...]:
+            """ The function takes a previous ID and extends it with an identifier of given Thing. """
+
+            new_id = id(obj)
+            if len(previous_id) == 0:
+                return (new_id,)
+            if len(previous_id) > 0 and new_id == previous_id[-1]:
+                previous_id = previous_id[:-1]
+            return previous_id + (new_id,)
+
+        idset:set[tuple[int,...]] = set()
+        """ Store identifiers of already expanded Things/paths such that we don't go there again. """
+
+        queuestack:list[Thing.WalkReturnType] = [Thing.WalkReturnType(
+                parent=None,
+                parent_identifier=(),
+                joint=None,
+                child=self,
+                child_identifier=(0,),
+                allow_continuation_against_hierarchy=allow_traversal_against_hierarchy,
+            )]
+        """ Auxiliary list for the purpose of traversal. """
+
+        while len(queuestack) > 0:
+            current_walk_node = queuestack.pop(0 if bfs else -1)
+            idset.add(current_walk_node.child_identifier)
+            if "Thing.walk" in DEBUG: print(f"\n{pformat(current_walk_node)}")
+
+            if depth_limit is None or len(current_walk_node.child_identifier) < depth_limit:
+                joints:list[tuple[AbstractJoint, bool]] = []
+                """ Gather all joints incident with `child`. Boolean meaning: `True`~Joint leads along original hierarchy, `False`~Joint leads against original hierarchy."""
+                for name, value in current_walk_node.child.__dict__.items():
+                    if isinstance(value, MountPoint):
+                        if value._joint_outbound is not None:
+                            joints.append((value._joint_outbound, True))
+                        if current_walk_node.allow_continuation_against_hierarchy:
+                            for joint in value._joints_inbound:
+                                joints.append((joint, False))
+                if "Thing.walk" in DEBUG: print(f"Joints: {joints}")
+                for joint, hierarchy_conserved in joints:
+                    print("JOINT", hierarchy_conserved, joint)
+                    grandchild = joint.get_other_mount(current_walk_node.child)._owner
+
+                    assert grandchild is not None
+                    grandchild_id = id_fnc(joint, current_walk_node.child_identifier)
+                    if grandchild_id not in idset:
+                        queuestack.append(Thing.WalkReturnType(
+                            parent=current_walk_node.child,
+                            parent_identifier=current_walk_node.child_identifier,
+                            joint=joint,
+                            child=grandchild,
+                            child_identifier=grandchild_id,
+                            allow_continuation_against_hierarchy=True if not hierarchy_conserved and current_walk_node.allow_continuation_against_hierarchy else False,
+                        ))
+                        if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} added")
+                    else:
+                        if "Thing.walk" in DEBUG: print(f" -> Grandchild: {repr(grandchild)} REJECTED")
+
+            yield current_walk_node
+            if "Thing.walk" in DEBUG: print(f"Iteration done.")
 
     @final
     def __copy__(self) -> "Thing":
@@ -700,7 +827,7 @@ class AbstractJoint (ABC):
 
         If the mount point had "second owner", which would reference this joint for convenience, it would make multi-mounting very hard.
         """
-        raise RuntimeError("Never call this subclass method.")
+        raise RuntimeError("Never call this subclass method - it has to be overriden.")
 
     def __init__ (self, reference_mount:"MountPoint|TransformResolver", moving_mount:"MountPoint|TransformResolver", mounts_are_peers:bool=False):
         """ For the purpose of defining hierarchy in the design, always one of the mounts is designated as the reference mount which is regarded as the local root of the induced subassembly.
@@ -744,12 +871,23 @@ class AbstractJoint (ABC):
         This rather wild conditional assignment allows setting it in subclass constructor befor or after calling this init."""
         self.set_default()
 
-    def get_other_mount(self, ref:MountPoint) -> MountPoint:
+    def get_other_mount(self, ref:MountPoint|Thing) -> MountPoint:
         """ Identifies the mount which a given Thing is attached by this Joint. """
-        if ref is self.reference_mount:
-            return self.moving_mount
-        elif ref is self.moving_mount:
-            return self.reference_mount
+        if isinstance(ref, MountPoint):
+            if ref is self.reference_mount:
+                return self.moving_mount
+            elif ref is self.moving_mount:
+                return self.reference_mount
+            else:
+                raise ValueError
+        elif isinstance(ref, Thing):
+            if ref is self.reference_mount._owner:
+                return self.moving_mount
+            elif ref is self.moving_mount._owner:
+                return self.reference_mount
+            else:
+                #print(f"Cannot match {repr(ref)} against {repr(self.reference_mount._owner)} or {repr(self.moving_mount._owner)}")
+                raise ValueError
         else:
             raise ValueError
 
