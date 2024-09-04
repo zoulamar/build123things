@@ -33,6 +33,7 @@ def fmt_loc (x:build123d.Location) -> dict[str,str]:
     }
 
 NAMESPACE_SEPARATOR = ":"
+HACK_MINIMAL_INERTIA = "0.00001"
 
 def export(thing:Thing, target_dir:Path) -> ElementTree:
     """ The main function.
@@ -52,6 +53,9 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
 
     xml_meshes:dict[int,Element] = {}
     """ Maps Thing to XML representing the exported geometry. """
+
+    xml_dynamics:dict[int,Element] = {}
+    """ Maps Thing to XML representing the dynamics. """
 
     xml_materials:dict[str,Element] = {}
     """ Elements defining the meshes. """
@@ -87,7 +91,7 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
                     * traversor.joint.transform(
                         traversor.joint.get_other_mount(traversor.parent),
                         traversor.joint.get_other_mount(traversor.child) ) \
-                    * traversor.joint.get_other_mount(traversor.parent).location
+                    * traversor.joint.get_other_mount(traversor.parent).location.inverse()
                 xml_child.attrib.update(fmt_loc(total_transf).items())
             elif isinstance(traversor.joint, Revolute):
                 parent_to_joint = build123d.Location() \
@@ -112,14 +116,6 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
             else:
                 raise NotImplementedError()
 
-        ## Export the material.
-        material_name = thing.__material__.codename
-        if material_name not in xml_materials:
-            xml_materials[material_name] = Element("material",
-                name=material_name,
-                rgba=" ".join(map(fmt, thing.__material__.color.rgba))
-                )
-
         # Export the mesh.
         mesh_name = traversor.child.codename()
         if id(traversor.child) not in xml_meshes:
@@ -133,37 +129,33 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
                     "file":str(stl_file.relative_to(target_dir))
                 })
         if id(traversor.child) in xml_meshes:
-            xml_child.append(Element("geom", type="mesh", mesh=mesh_name, material=material_name))
+            rgba = list(thing.__material__.color.rgba)
+            rgba[-1] = 1-rgba[-1]
+            xml_child.append(Element("geom",
+                type="mesh",
+                mesh=mesh_name,
+                rgba=" ".join(map(fmt, rgba))
+            ))
 
-        # Export the dynamic properties.
-        if res is not None:
-            # Export the dynamic properties.
-            inertia, com = thing.matrix_of_inertia()
-            inertial = Element("inertial", {
-                "pos" : " ".join(map(fmt_scale(0.001), com)),
-                #"euler" : "0 0 0",
-                "mass" : fmt(thing.mass()),
-                #"fullinertia" : " ".join(map(fmt, (inertia[0,0], inertia[1,1], inertia[2,2], inertia[0,1], inertia[0,2], inertia[1,2]))),
-            })
-            link_element.append(inertial)
-
-            # Export the geometry.
-            geom = Element("geom", {
-                #"name": "full_body",
-                #"class": "default_build123things_stl",
-                "type": "mesh",
-                "material": material_name,
-                "mesh": mesh_name,
+        # export the dynamic properties.
+        if id(traversor.child) not in xml_dynamics:
+            res = traversor.child.result()
+            if res is not None:
+                inertia, com = thing.matrix_of_inertia()
+                xml_inertial = Element("inertial", {
+                    "pos" : " ".join(map(fmt_scale(0.001), com)),
+                    #"euler" : "0 0 0",
+                    "mass" : fmt(thing.mass()),
+                    #"fullinertia" : " ".join(map(fmt, (inertia[0,0], inertia[1,1], inertia[2,2], inertia[0,1], inertia[0,2], inertia[1,2]))),
                 })
-
-            link_element.append(geom)
-        else:
-            inertial = Element("inertial", {
-                "pos" : "0 0 0",
-                "mass" : HACK_MINIMAL_INERTIA,
-                "fullinertia" : " ".join(map(fmt, (HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, 0, 0, 0))),
-            })
-            link_element.append(inertial)
+            else:
+                xml_inertial = Element("inertial", {
+                    "pos" : "0 0 0",
+                    "mass" : HACK_MINIMAL_INERTIA,
+                    "fullinertia" : " ".join(map(fmt, (HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, 0, 0, 0))),
+                })
+            xml_dynamics[id(traversor.child)] = xml_inertial
+        xml_child.append(xml_dynamics[id(traversor.child)])
 
     assets = Element("asset")
     for _, v in xml_meshes.items():
@@ -180,35 +172,35 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
 
 if __name__ == "__main__":
 
-    # Start the program
+    # start the program
     import argparse
     import importlib
     from datetime import datetime
-    EMPTY_ELEMENTS_FMT_LOOKUP = {
+    empty_elements_fmt_lookup = {
             "short": True,
             "s": True,
             "expand": False,
             "e": False,
     }
-    argp = argparse.ArgumentParser(description="Export a Thing to `mjcf` XML.")
-    argp.add_argument("module", help="Identify the module containing the thing.")
-    argp.add_argument("thing", help="Identify the thing in the module to export.")
-    argp.add_argument("--root-selector", "-r", default=None, type=str, help="An expression to select a single specific sub-Thing to use as the future root.")
-    argp.add_argument("--root-joint", "-j", default="free", help="How to connect the exprt-wise root")
-    argp.add_argument("--param-file", "-p", default=None, type=Path, help="Yaml file containing args and kwargs to pass to thing constructor. Expects two documents (separated by ---) in the file, the first with array (args) and the second with dict (kwargs).")
-    argp.add_argument("--target-dir", "-d", default=None, type=Path, help="Target directory.")
-    #argp.add_argument("--worldbody", "-w", action="store_true", help="Export as self-standing MuJoCo model with the worldbody element and simulation stubs. (If absent, a MuJoCo embeddable )")
-    argp.add_argument("--empty-elements-fmt", "-e", type=str, choices=EMPTY_ELEMENTS_FMT_LOOKUP.keys(), default="short", help="In XML, empty tags (with no content) may be shortened to <tag /> or left as <tag></tag>")
+    argp = argparse.ArgumentParser(description="export a thing to `mjcf` xml.")
+    argp.add_argument("module", help="identify the module containing the thing.")
+    argp.add_argument("thing", help="identify the thing in the module to export.")
+    argp.add_argument("--root-selector", "-r", default=None, type=str, help="an expression to select a single specific sub-thing to use as the future root.")
+    argp.add_argument("--root-joint", "-j", default="free", help="how to connect the exprt-wise root")
+    argp.add_argument("--param-file", "-p", default=None, type=Path, help="yaml file containing args and kwargs to pass to thing constructor. expects two documents (separated by ---) in the file, the first with array (args) and the second with dict (kwargs).")
+    argp.add_argument("--target-dir", "-d", default=None, type=Path, help="target directory.")
+    #argp.add_argument("--worldbody", "-w", action="store_true", help="export as self-standing mujoco model with the worldbody element and simulation stubs. (if absent, a mujoco embeddable )")
+    argp.add_argument("--empty-elements-fmt", "-e", type=str, choices=empty_elements_fmt_lookup.keys(), default="short", help="in xml, empty tags (with no content) may be shortened to <tag /> or left as <tag></tag>")
     args = argp.parse_args()
 
-    # Build the Thing and select root
+    # build the thing and select root
     pymod = importlib.import_module(args.module)
     thing_cls = getattr(pymod, args.thing)
     if args.param_file is None:
         thing:Thing = thing_cls()
     else:
-        raise NotImplementedError("TODO: Parse the yaml and instantiate.")
-    print(f"Created a Thing\n{thing}:")
+        raise NotImplementedError("todo: parse the yaml and instantiate.")
+    print(f"created a thing\n{thing}:")
     if isinstance(args.root_selector, str):
         selectors = args.root_selector.split(".")
         assert len(selectors) > 0
@@ -217,12 +209,12 @@ if __name__ == "__main__":
             thing = getattr(thing, selector)
         assert isinstance(thing, TransformResolver)
         thing = thing.wrapped
-        print(f"Selected the thing.{'.'.join(selectors)} as the root:\n{thing}")
+        print(f"selected the thing.{'.'.join(selectors)} as the root:\n{thing}")
     else:
         assert args.root_selector is None
-        print("The thing is regarded as the export root.")
+        print("the thing is regarded as the export root.")
 
-    # Do the export
+    # do the export
     if args.target_dir is None:
         target_dir:Path = Path.cwd() / "build" / (datetime.now().isoformat()[:19].replace(":","-") + "-" + thing.codename())
     else:
@@ -230,5 +222,5 @@ if __name__ == "__main__":
     target_dir.mkdir(parents=True, exist_ok=True)
     etree = export(thing, target_dir)
     xml.etree.ElementTree.indent(etree)
-    etree.write(target_dir / "robot.mjcf", xml_declaration=True, short_empty_elements=EMPTY_ELEMENTS_FMT_LOOKUP[args.empty_elements_fmt])
+    etree.write(target_dir / "robot.mjcf", xml_declaration=True, short_empty_elements=empty_elements_fmt_lookup[args.empty_elements_fmt])
 
