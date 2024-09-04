@@ -33,7 +33,7 @@ def fmt_loc (x:build123d.Location, scale:float=1) -> dict[str,str]:
     }
 
 NAMESPACE_SEPARATOR = ":"
-HACK_MINIMAL_INERTIA = "0.00001"
+HACK_MINIMAL_INERTIA = "0.001"
 
 def export(thing:Thing, target_dir:Path) -> ElementTree:
     """ The main function.
@@ -117,11 +117,11 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
                     type="hinge" ,
                     pos=" ".join(map(fmt_scale(0.001), child_to_joint.position)),
                     axis=" ".join(map(fmt, child_to_joint_axis)),
-                    springdamper = "0 0",
-                    limited = "false" if traversor.joint.limit_angle is None else "true",
-                    range = "0 0" if traversor.joint.limit_angle is None else " ".join(map(fmt, traversor.joint.limit_angle)),
-                    actuatorfrclimited = "false" if traversor.joint.limit_effort is None else "true",
-                    actuatorfrcrange = "0 0" if traversor.joint.limit_effort is None else f"0 {fmt(traversor.joint.limit_effort)}",
+                    #springdamper = "0 0",
+                    #limited = "false" if traversor.joint.limit_angle is None else "true",
+                    #range = "0 0" if traversor.joint.limit_angle is None else " ".join(map(fmt, traversor.joint.limit_angle)),
+                    #actuatorfrclimited = "false" if traversor.joint.limit_effort is None else "true",
+                    #actuatorfrcrange = "0 0" if traversor.joint.limit_effort is None else f"0 {fmt(traversor.joint.limit_effort)}",
                 )
                 if traversor.joint.global_name is not None:
                     xml_joint.attrib.update(name = traversor.joint.global_name)
@@ -144,7 +144,7 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
                 })
         if id(traversor.child) in xml_meshes:
             rgba = list(traversor.child.__material__.color.rgba)
-            rgba[-1] = 1-rgba[-1]
+            rgba[-1] = 1
             xml_child.append(Element("geom",
                 type="mesh",
                 mesh=mesh_name,
@@ -161,7 +161,7 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
                     #"euler" : "0 0 0",
                     "mass" : fmt(thing.mass()),
                     #"fullinertia" : " ".join(map(fmt, (HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, 0, 0, 0))),
-                    "fullinertia" : " ".join(map(fmt, (inertia[0,0], inertia[1,1], inertia[2,2], inertia[0,1], inertia[0,2], inertia[1,2]))),
+                    #"fullinertia" : " ".join(map(fmt, (inertia[0,0], inertia[1,1], inertia[2,2], inertia[0,1], inertia[0,2], inertia[1,2]))),
                 })
             else:
                 xml_inertial = Element("inertial", {
@@ -236,6 +236,15 @@ if __name__ == "__main__":
         target_dir:Path = args.target_dir
     target_dir.mkdir(parents=True, exist_ok=True)
     etree = export(thing, target_dir)
-    xml.etree.ElementTree.indent(etree)
+    xml.etree.ElementTree.indent(etree, space="  ")
     etree.write(target_dir / "robot.mjcf", xml_declaration=True, short_empty_elements=empty_elements_fmt_lookup[args.empty_elements_fmt])
+
+
+
+
+
+
+
+
+
 
