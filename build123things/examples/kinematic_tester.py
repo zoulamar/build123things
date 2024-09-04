@@ -11,9 +11,9 @@ from build123things.materials import PETG
 class LinkA (Thing):
     def __init__(self) -> None:
         super().__init__(PETG(color=Color(1,0,0,0)))
-        self.body = bd.Box(1000,1000,1000) + L((0,0,500)) * bd.Box(100,100,100)
+        self.body = bd.Box(1000,1000,1000) + L((0,0,500)) * bd.Box(100,100,100) + L((500,0,0)) * bd.Sphere(100)
 
-        self.linkb = M(L((500,0,0)))
+        self.linkb = M(L((1500,0,0), (0,0,0)))
         self.joint = Rigid(self.linkb, LinkB().linka)
 
     def result(self) -> bd.Part:
@@ -22,11 +22,11 @@ class LinkA (Thing):
 class LinkB (Thing):
     def __init__(self) -> None:
         super().__init__(PETG(color=Color(0,1,0,0)))
-        self.body = bd.Box(1000,1000,1000) + L((0,0,500)) * bd.Box(100,100,100)
+        self.body = bd.Box(1000,1000,1000) + L((0,0,500)) * bd.Box(100,100,100) + L((500,0,0)) * bd.Sphere(100)
 
-        self.linka = M(L((-500,0,0),(180,0,90)))
+        self.linka = M(L((-1500,0,0),(180,0,90)))
 
-        self.linkc = M(L((500,0,0)))
+        self.linkc = M(L((1500,0,0), (0,90,0)))
         self.joint = Revolute(self.linkc, LinkC().linkb)
 
     def result(self) -> bd.Part:
@@ -35,9 +35,9 @@ class LinkB (Thing):
 class LinkC (Thing):
     def __init__(self) -> None:
         super().__init__(PETG(color=Color(0,0,1,0)))
-        self.body = bd.Box(1000,1000,1000) + L((0,0,500)) * bd.Box(100,100,100)
+        self.body = bd.Box(1000,1000,1000) + L((0,0,500)) * bd.Box(100,100,100) + L((500,0,0)) * bd.Sphere(100)
 
-        self.linkb = M(L((-500,0,0),(180,0,90)))
+        self.linkb = M(L((-1500,0,0),(180,-90,90)))
 
     def result(self) -> bd.Part:
         return self.body

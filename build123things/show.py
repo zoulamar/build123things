@@ -73,7 +73,7 @@ def _ (thing_grounder:TransformResolver):
     for _, attached in thing_grounder.enumerate_assembly():
         attached:TransformResolver
         """ The assembly returns the Grounder. """
-        show(attached._joint, attached._orig_mount.location, diag)
+        #show(attached._joint, attached._orig_mount.location, diag)
         show(attached)
 
 @show.register

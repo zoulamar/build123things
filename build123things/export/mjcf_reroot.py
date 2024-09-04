@@ -26,9 +26,9 @@ def fmt (sth:Any) -> str:
 def _ (x:float) -> str:
     return f"{x:.4f}"
 
-def fmt_loc (x:build123d.Location) -> dict[str,str]:
+def fmt_loc (x:build123d.Location, scale:float=1) -> dict[str,str]:
     return {
-        "pos" : " ".join(map(fmt, x.position.to_tuple())),
+        "pos" : " ".join(map(fmt_scale(scale), x.position.to_tuple())),
         "euler" : " ".join(map(fmt, x.orientation.to_tuple())),
     }
 
@@ -86,20 +86,33 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
         # Handle the parent-to-joint and child-to-joint transforms.
         if traversor.joint is not None and traversor.parent is not None:
             if isinstance(traversor.joint, Rigid):
-                total_transf = build123d.Location() \
-                    * traversor.joint.get_other_mount(traversor.child).location \
-                    * traversor.joint.transform(
+                t1 = traversor.joint.get_other_mount(traversor.child).location
+                t2 = build123d.Location((0,0,0),(180,0,90)) * traversor.joint.transform(
                         traversor.joint.get_other_mount(traversor.parent),
-                        traversor.joint.get_other_mount(traversor.child) ) \
-                    * traversor.joint.get_other_mount(traversor.parent).location.inverse()
-                xml_child.attrib.update(fmt_loc(total_transf).items())
+                        traversor.joint.get_other_mount(traversor.child) )
+                t3 = traversor.joint.get_other_mount(traversor.parent).location.inverse()
+                print(f"t1: {t1}")
+                print(f"t2: {t2}")
+                print(f"t3: {t3}")
+                total_transf = t1 * t2 * t3
+                print(f"tt: {total_transf}")
+                xml_child.attrib.update(fmt_loc(total_transf, 0.001).items())
             elif isinstance(traversor.joint, Revolute):
-                parent_to_joint = build123d.Location() \
-                    * traversor.joint.get_other_mount(traversor.child).location \
-                    * build123d.Location((), (180,0,90))
-                xml_child.attrib.update(fmt_loc(parent_to_joint).items())
-                child_to_joint = traversor.joint.get_other_mount(traversor.parent).location.inverse()
-                child_to_joint_axis = Rotation.from_euler(angles=child_to_joint.orientation.to_tuple(),seq="xyz").as_matrix()[:,2]
+                t1 = traversor.joint.get_other_mount(traversor.child).location
+                t2 = build123d.Location((0,0,0),(180,0,90)) * traversor.joint.transform(
+                        traversor.joint.get_other_mount(traversor.parent),
+                        traversor.joint.get_other_mount(traversor.child) )
+                t3 = traversor.joint.get_other_mount(traversor.parent).location.inverse()
+                print(f"t1: {t1}")
+                print(f"t2: {t2}")
+                print(f"t3: {t3}")
+                total_transf = t1 * t2 * t3
+                print(f"tt: {total_transf}")
+                xml_child.attrib.update(fmt_loc(total_transf, scale=0.001).items())
+
+                child_to_joint = t3.inverse() * t2.inverse()
+                print(f"tx: {child_to_joint}")
+                child_to_joint_axis = child_to_joint.to_axis().direction
                 xml_joint = Element("joint",
                     type="hinge" ,
                     pos=" ".join(map(fmt_scale(0.001), child_to_joint.position)),
@@ -121,6 +134,7 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
         if id(traversor.child) not in xml_meshes:
             res = traversor.child.result()
             if res is not None:
+                res = res.scale(0.001)
                 stl_file = target_dir / "assets" / (mesh_name + ".stl")
                 stl_file.parent.mkdir(exist_ok=True, parents=True)
                 res.export_stl(str(stl_file))
@@ -129,7 +143,7 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
                     "file":str(stl_file.relative_to(target_dir))
                 })
         if id(traversor.child) in xml_meshes:
-            rgba = list(thing.__material__.color.rgba)
+            rgba = list(traversor.child.__material__.color.rgba)
             rgba[-1] = 1-rgba[-1]
             xml_child.append(Element("geom",
                 type="mesh",
@@ -146,7 +160,8 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
                     "pos" : " ".join(map(fmt_scale(0.001), com)),
                     #"euler" : "0 0 0",
                     "mass" : fmt(thing.mass()),
-                    #"fullinertia" : " ".join(map(fmt, (inertia[0,0], inertia[1,1], inertia[2,2], inertia[0,1], inertia[0,2], inertia[1,2]))),
+                    #"fullinertia" : " ".join(map(fmt, (HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, 0, 0, 0))),
+                    "fullinertia" : " ".join(map(fmt, (inertia[0,0], inertia[1,1], inertia[2,2], inertia[0,1], inertia[0,2], inertia[1,2]))),
                 })
             else:
                 xml_inertial = Element("inertial", {
