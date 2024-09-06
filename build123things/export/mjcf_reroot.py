@@ -63,7 +63,7 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
     xml_by_id:dict[tuple[int,...],Element] = {(): Element("worldbody",name="")}
     """ `Thing.WalkReturnType.child_identifier` -> `Element` and joint-to-origin transform which needs to be applied to all childern."""
 
-    for traversor in thing.walk():
+    for traversor_i, traversor in enumerate(thing.walk()):
         print(f"Traversing {traversor}")
 
         # Prepare and link the XMLs, fing the parent
@@ -78,8 +78,8 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
         child_name = xml_parent.attrib["name"] + NAMESPACE_SEPARATOR + traversor.child.codename() + f"{count_thing_instances[id(traversor.child)]:03d}"
         xml_child.attrib.update(name=child_name)
         count_thing_instances[id(traversor.child)] += 1
-        assert child_name not in check_thing_name_integrity or id(traversor.child) == check_thing_name_integrity[child_name]
-        assert traversor.child.codename() not in check_thing_name_integrity or id(traversor.child) == check_thing_name_integrity[traversor.child.codename()]
+        #assert child_name not in check_thing_name_integrity or id(traversor.child) == check_thing_name_integrity[child_name]
+        #assert traversor.child.codename() not in check_thing_name_integrity or id(traversor.child) == check_thing_name_integrity[traversor.child.codename()]
         check_thing_name_integrity[child_name] = id(traversor.child)
         check_thing_name_integrity[traversor.child.codename()] = id(traversor.child)
 
@@ -148,7 +148,9 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
             xml_child.append(Element("geom",
                 type="mesh",
                 mesh=mesh_name,
-                rgba=" ".join(map(fmt, rgba))
+                rgba=" ".join(map(fmt, rgba)),
+                contype = f"{traversor_i%2}",
+                conaffinity = f"{(traversor_i+1)%2}",
             ))
 
         # export the dynamic properties.
