@@ -12,6 +12,7 @@ import xml.etree.ElementTree
 from functools import singledispatch
 from build123things.joints import Revolute, Rigid
 from scipy.spatial.transform import Rotation
+import colored
 
 def fmt_scale(how:float):
     def fmt_inner(what:float):
@@ -51,7 +52,7 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
     check_joint_names_duplicates:set[str] = set()
     """ Just to ensure each joint is exported only once. """
 
-    xml_meshes:dict[int,Element] = {}
+    xml_meshes:dict[str,Element] = {}
     """ Maps Thing to XML representing the exported geometry. """
 
     xml_dynamics:dict[int,Element] = {}
@@ -64,7 +65,7 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
     """ `Thing.WalkReturnType.child_identifier` -> `Element` and joint-to-origin transform which needs to be applied to all childern."""
 
     for traversor_i, traversor in enumerate(thing.walk()):
-        print(f"Traversing {traversor}")
+        print(f"{colored.Fore.red}Traversing {traversor}{colored.Style.reset}")
 
         # Prepare and link the XMLs, fing the parent
         xml_parent = xml_by_id[traversor.parent_identifier]
@@ -72,13 +73,19 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
         assert traversor.child_identifier not in xml_by_id
         xml_by_id[traversor.child_identifier] = xml_child
         xml_by_id[traversor.parent_identifier].append(xml_child)
-        print(f"Current parent tag:\n{xml.etree.ElementTree.tostring(xml_parent)}")
+        #print(f"Current parent tag:\n{xml.etree.ElementTree.tostring(xml_parent)}")
 
         # Check that the codename is unique
-        child_name = xml_parent.attrib["name"] + NAMESPACE_SEPARATOR + traversor.child.codename() + f"{count_thing_instances[id(traversor.child)]:03d}"
+        if traversor.joint is None:
+            mount_known_as = traversor.child.codename()
+        else:
+            mount_known_as = traversor.joint.get_other_mount(traversor.child).known_as
+        child_name = xml_parent.attrib["name"] + NAMESPACE_SEPARATOR + mount_known_as + f"{count_thing_instances[id(traversor.child)]:03d}"
         xml_child.attrib.update(name=child_name)
         count_thing_instances[id(traversor.child)] += 1
-        #assert child_name not in check_thing_name_integrity or id(traversor.child) == check_thing_name_integrity[child_name]
+        if child_name in check_thing_name_integrity or id(traversor.child) != check_thing_name_integrity[child_name]:
+            print(f"{colored.Fore.yellow}WARN: SKIPPING {traversor}{colored.Style.reset}")
+            continue
         #assert traversor.child.codename() not in check_thing_name_integrity or id(traversor.child) == check_thing_name_integrity[traversor.child.codename()]
         check_thing_name_integrity[child_name] = id(traversor.child)
         check_thing_name_integrity[traversor.child.codename()] = id(traversor.child)
@@ -131,18 +138,18 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
 
         # Export the mesh.
         mesh_name = traversor.child.codename()
-        if id(traversor.child) not in xml_meshes:
+        if mesh_name not in xml_meshes:
             res = traversor.child.result()
             if res is not None:
                 res = res.scale(0.001)
                 stl_file = target_dir / "assets" / (mesh_name + ".stl")
                 stl_file.parent.mkdir(exist_ok=True, parents=True)
                 res.export_stl(str(stl_file))
-                xml_meshes[id(traversor.child)] = Element("mesh", {
+                xml_meshes[mesh_name] = Element("mesh", {
                     "name":mesh_name,
                     "file":str(stl_file.relative_to(target_dir))
                 })
-        if id(traversor.child) in xml_meshes:
+        if mesh_name in xml_meshes:
             rgba = list(traversor.child.__material__.color.rgba)
             rgba[-1] = 1
             xml_child.append(Element("geom",
@@ -157,12 +164,12 @@ def export(thing:Thing, target_dir:Path) -> ElementTree:
         if id(traversor.child) not in xml_dynamics:
             res = traversor.child.result()
             if res is not None:
-                inertia, com = thing.matrix_of_inertia()
+                inertia, com = traversor.child.matrix_of_inertia()
                 xml_inertial = Element("inertial", {
                     "pos" : " ".join(map(fmt_scale(0.001), com)),
                     #"euler" : "0 0 0",
-                    "mass" : fmt(thing.mass()),
-                    #"fullinertia" : " ".join(map(fmt, (HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, 0, 0, 0))),
+                    "mass" : fmt(traversor.child.mass()),
+                    "fullinertia" : " ".join(map(fmt, (HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, HACK_MINIMAL_INERTIA, 0, 0, 0))),
                     #"fullinertia" : " ".join(map(fmt, (inertia[0,0], inertia[1,1], inertia[2,2], inertia[0,1], inertia[0,2], inertia[1,2]))),
                 })
             else:
