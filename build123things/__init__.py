@@ -143,7 +143,7 @@ class MountPoint:
 
     @property
     def known_as(self):
-        return self._owner
+        return self._known_as if self._known_as is not None else "???"
 
     @known_as.setter
     def known_as(self, value) -> None:

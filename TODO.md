@@ -204,3 +204,4 @@ An annotation which states, e.g., how the Thing should be 3D printed, from which
 
 # GUI with explicit dependency and reference geometry visualization and management.
 
+# What if I want to use a servo twice, first mounted by stator and once by rotor?
