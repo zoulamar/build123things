@@ -12,6 +12,7 @@ Having a Thing which aggregates some of its (mounted!) properties in a list-like
 
 # Memoization is a key tool used in the library, yet is currently extremly naive and inefficient.
 Some day it would be nice to improve the string-based current approach.
+Use generic memoization as the for lazy computation. Maybe even make the memoization of `.result` the default behavior. (Hijack it...)
 
 # How to systematically access location of mount points?
 - When accessed, a TransformResolver is returned. However, there is no
