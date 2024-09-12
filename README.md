@@ -59,6 +59,6 @@ Export the designs using, e.g., ``python3 -m build123things.export.assembly_grap
 
 ## Scientific Publications
 
-This library is a considered a supplementary material for a manuscript submitted for the The 2024 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS 2024).
+This library is a considered a supplementary material for a manuscript submitted for the The 2025 IEEE International Conference on Robotics & Automation (ICRA 2025).
 In case of acceptance, we will provide here a preferred bibtex record.
 
