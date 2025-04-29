@@ -1,0 +1,7 @@
+cadquery==2.3.1
+cadquery-ocp==7.7.0
+build123d==0.2.0
+colored==2.2.3
+pystl==0.1.1
+git+https://github.com/jdegenstein/jmwright-CQ-Editor
+graphviz==0.20.3
