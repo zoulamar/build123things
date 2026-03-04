@@ -34,11 +34,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.""",
     packages=['build123things', 'build123things.partlib', 'build123things.examples', 'build123things.export'],
     zip_safe=False,
     install_requires=[
-        "ocp_vscode==2.7.1",
+        "ocp_vscode==3.1.2",
         "cadquery-ocp==7.8.1.1.post1",
         "build123d==0.9.1",
         "colored==2.3.0",
         "graphviz==0.20.3",
+        "pystl==0.1.1"
     ],
 )
 
